@@ -11,7 +11,6 @@ use json_patch::Patch;
 use leptos::{create_signal, ReadSignal, WriteSignal};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use wasm_bindgen::throw_str;
 use wasm_bindgen::JsValue;
 use wasm_bindgen::UnwrapThrowExt;
 
@@ -29,24 +28,28 @@ cfg_if::cfg_if! {
     }
 }
 
-trait UnwrapExt<T> {
-    fn unwrap_with_error_details(self) -> T;
+cfg_if::cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        trait UnwrapExt<T> {
+            fn unwrap_with_error_details(self) -> T;
 
-    fn expect_with_error_details(self, msg: &str) -> T;
-}
-
-impl<T, E: Debug> UnwrapExt<T> for Result<T, E> {
-    fn unwrap_with_error_details(self) -> T {
-        match self {
-            Ok(val) => val,
-            Err(err) => throw_str(&format!("{:?}", err)),
+            fn expect_with_error_details(self, msg: &str) -> T;
         }
-    }
 
-    fn expect_with_error_details(self, msg: &str) -> T {
-        match self {
-            Ok(val) => val,
-            Err(err) => throw_str(&format!("{msg}: {:?}", err)),
+        impl<T, E: Debug> UnwrapExt<T> for Result<T, E> {
+            fn unwrap_with_error_details(self) -> T {
+                match self {
+                    Ok(val) => val,
+                    Err(err) => wasm_bindgen::throw_str(&format!("{:?}", err)),
+                }
+            }
+
+            fn expect_with_error_details(self, msg: &str) -> T {
+                match self {
+                    Ok(val) => val,
+                    Err(err) => wasm_bindgen::throw_str(&format!("{msg}: {:?}", err)),
+                }
+            }
         }
     }
 }
