@@ -4,13 +4,16 @@ use std::borrow::Borrow;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::rc::Rc;
 
 use json_patch::Patch;
 use leptos::{create_signal, ReadSignal, WriteSignal};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use wasm_bindgen::throw_str;
 use wasm_bindgen::JsValue;
+use wasm_bindgen::UnwrapThrowExt;
 
 cfg_if::cfg_if! {
     if #[cfg(all(feature = "actix", feature = "ssr"))] {
@@ -23,6 +26,28 @@ cfg_if::cfg_if! {
     if #[cfg(all(feature = "axum", feature = "ssr"))] {
         mod axum;
         pub use crate::axum::*;
+    }
+}
+
+trait UnwrapExt<T> {
+    fn unwrap_with_error_details(self) -> T;
+
+    fn expect_with_error_details(self, msg: &str) -> T;
+}
+
+impl<T, E: Debug> UnwrapExt<T> for Result<T, E> {
+    fn unwrap_with_error_details(self) -> T {
+        match self {
+            Ok(val) => val,
+            Err(err) => throw_str(&format!("{:?}", err)),
+        }
+    }
+
+    fn expect_with_error_details(self, msg: &str) -> T {
+        match self {
+            Ok(val) => val,
+            Err(err) => throw_str(&format!("{msg}: {:?}", err)),
+        }
     }
 }
 
@@ -126,7 +151,7 @@ where
             use leptos::{use_context, create_effect, SignalGet, SignalSet, SignalUpdate};
             use js_sys::{Function, JsString};
 
-            let (json_get, json_set) = create_signal(serde_json::to_value(T::default()).unwrap());
+            let (json_get, json_set) = create_signal(serde_json::to_value(T::default()).expect_with_error_details("Failed to serialize default value"));
             if let Some(ServerSignalWebSocket {state_signals: state_signals, ..}) = use_context::<ServerSignalWebSocket>() {
                 state_signals.borrow_mut().insert(name.to_string(), (json_get, json_set));
 
@@ -136,7 +161,7 @@ where
                 // that on the server side
                 create_effect(move |_| {
                     let name = name.clone();
-                    let new_value = serde_json::from_value(json_get.get()).unwrap();
+                    let new_value = serde_json::from_value(json_get.get()).expect_with_error_details("Failed to deserialize new value");
                     set.set(new_value);
                 });
 
@@ -185,13 +210,13 @@ cfg_if::cfg_if! {
                 provide_context(ServerSignalWebSocket{ws: ws, state_signals: Rc::default(), delayed_updates: Rc::default()});
             }
 
-            let ws = use_context::<ServerSignalWebSocket>().unwrap();
+            let ws = use_context::<ServerSignalWebSocket>().unwrap_throw();
 
             let handlers = ws.state_signals.clone();
             let delayed_updates = ws.delayed_updates.clone();
 
             let callback = Closure::wrap(Box::new(move |event: MessageEvent| {
-                let ws_string = event.data().dyn_into::<JsString>().unwrap().as_string().unwrap();
+                let ws_string = event.data().dyn_into::<JsString>().unwrap_with_error_details().as_string().unwrap_throw();
                 if let Ok(update_signal) = serde_json::from_str::<ServerSignalUpdate>(&ws_string) {
                     let handler_map = (*handlers).borrow();
                     let name = update_signal.name.borrow();
@@ -200,12 +225,12 @@ cfg_if::cfg_if! {
                         if let Some(delayed_patches) = delayed_map.remove(name) {
                             json_set.update(|doc| {
                                 for patch in delayed_patches {
-                                    json_patch::patch(doc, &patch).unwrap();
+                                    json_patch::patch(doc, &patch).expect_with_error_details("Failed to patch value");
                                 }
                             });
                         }
                         json_set.update(|doc| {
-                            json_patch::patch(doc, &update_signal.patch).unwrap();
+                            json_patch::patch(doc, &update_signal.patch).expect_with_error_details("Failed to patch value");
                         });
                     } else {
                         leptos::logging::warn!("No local state for update to {}. Queuing patch.", name);
